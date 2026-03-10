@@ -1,0 +1,360 @@
+from google.colab import drive
+drive.mount('/content/drive')
+import struct
+from sklearn.decomposition import PCA
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.linear_model import RidgeClassifier, LogisticRegression
+from sklearn.model_selection import GridSearchCV, StratifiedKFold
+from sklearn.metrics import accuracy_score
+from sklearn.neighbors import KNeighborsClassifier
+
+## Training data
+with open('/content/drive/MyDrive/AMATH_482/train-images.idx3-ubyte','rb') as f:
+    magic, size = struct.unpack(">II", f.read(8))
+    nrows, ncols = struct.unpack(">II", f.read(8))
+    data = np.fromfile(f, dtype=np.dtype(np.uint8).newbyteorder('>'))
+    print(data.shape)
+    Xtraindata = np.transpose(data.reshape((size, nrows*ncols)))
+
+with open('/content/drive/MyDrive/AMATH_482/train-labels.idx1-ubyte','rb') as f:
+    magic, size = struct.unpack(">II", f.read(8))
+    data = np.fromfile(f, dtype=np.dtype(np.uint8).newbyteorder('>'))
+    ytrainlabels = data.reshape((size,)) # (Optional)
+
+## Testing data
+with open('/content/drive/MyDrive/AMATH_482/t10k-images.idx3-ubyte','rb') as f:
+    magic, size = struct.unpack(">II", f.read(8))
+    nrows, ncols = struct.unpack(">II", f.read(8))
+    data = np.fromfile(f, dtype=np.dtype(np.uint8).newbyteorder('>'))
+    Xtestdata = np.transpose(data.reshape((size, nrows*ncols)))
+
+with open('/content/drive/MyDrive/AMATH_482/t10k-labels.idx1-ubyte','rb') as f:
+    magic, size = struct.unpack(">II", f.read(8))
+    data = np.fromfile(f, dtype=np.dtype(np.uint8).newbyteorder('>'))
+    ytestlabels = data.reshape((size,)) # (Optional)
+
+
+
+traindata_imgs =  np.transpose(Xtraindata).reshape((60000,28,28))
+print(Xtraindata.shape)
+print(ytrainlabels.shape)
+print(Xtestdata.shape)
+print(ytestlabels.shape)
+
+# def plot_digits(XX, N, title):
+#     fig, ax = plt.subplots(N, N, figsize=(8, 8))
+
+#     for i in range(N):
+#       for j in range(N):
+#         ax[i,j].imshow(XX[:,(N)*i+j].reshape((28, 28)), cmap="Greys")
+#         ax[i,j].axis("off")
+#     fig.suptitle(title, fontsize=24)
+
+# plot_digits(Xtraindata, 8, "First 64 Training Images" )
+
+Xtraindata=np.transpose(Xtraindata)
+Xtestdata=np.transpose(Xtestdata)
+# print(Xtraindata.shape)
+print(ytrainlabels)
+# print(Xtestdata.shape)
+# print(ytestlabels.shape)
+
+##Task 1
+n_components_fit = 300
+pca = PCA(n_components=n_components_fit, svd_solver="randomized", random_state=0)
+pca.fit(Xtraindata)
+
+print("PCA fitted. components_ shape:", pca.components_.shape)
+
+fig, ax = plt.subplots(4, 4, figsize=(8, 8))
+for i in range(16):
+    r, c = divmod(i, 4)
+    ax[r, c].imshow(pca.components_[i].reshape(28, 28), cmap="Greys")
+    ax[r, c].axis("off")
+    ax[r, c].set_title(f"PC {i+1}", fontsize=10)
+plt.suptitle("First 16 Principal Component Modes", fontsize=16)
+plt.tight_layout()
+plt.show()
+
+##Task 2
+
+energy_threshold = 0.85
+sing_vals = pca.singular_values_
+energy = np.cumsum(sing_vals**2) / np.sum(sing_vals**2)
+k = np.searchsorted(energy, 0.85) + 1
+
+print("Energy threshold:", energy_threshold )
+print("k (PC modes for >=85% energy):", k)
+print("Captured energy at k:", energy[k-1])
+
+
+plt.figure(figsize=(7,4))
+plt.plot(np.arange(1, len(energy)+1), energy, marker='o', markersize=3)
+plt.axhline(energy_threshold, linestyle='--')
+plt.axvline(k, linestyle='--')
+plt.xlabel("Number of PC modes")
+plt.ylabel("Cumulative explained variance ratio")
+plt.title("Energy captured by PCA modes")
+plt.grid(True)
+plt.show()
+
+n_show = 10
+X0 = Xtraindata[:n_show, :]
+
+
+Z = pca.transform(X0)
+
+Zk = Z[:, :k]
+Vk = pca.components_[:k, :]
+
+
+X_hat = pca.mean_ + Zk @ Vk
+
+fig, ax = plt.subplots(2, n_show, figsize=(1.6*n_show, 4))
+for j in range(n_show):
+    ax[0, j].imshow(X0[j].reshape(28, 28), cmap="Greys")
+    ax[0, j].axis("off")
+    ax[1, j].imshow(X_hat[j].reshape(28, 28), cmap="Greys")
+    ax[1, j].axis("off")
+
+ax[0, 0].set_title("Original", fontsize=12)
+ax[1, 0].set_title(f"Reconstructed (k={k})", fontsize=12)
+plt.suptitle("Original vs k-truncated PCA Reconstruction", fontsize=16)
+plt.tight_layout()
+plt.show()
+
+##Task 3
+def subset_capturing(Xtrain, ytrain, Xtest, ytest, digits):
+    train_mask = np.isin(ytrain, digits)
+    test_mask = np.isin(ytest, digits)
+
+    Xsubtrain = Xtrain[train_mask]
+    ysubtrain = ytrain[train_mask]
+
+    Xsubtest = Xtest[test_mask]
+    ysubtest = ytest[test_mask]
+
+    return Xsubtrain, ysubtrain, Xsubtest, ysubtest
+
+##Task 4
+
+X_train_18, y_train_18, X_test_18, y_test_18 = subset_capturing(
+    Xtraindata, ytrainlabels, Xtestdata, ytestlabels, [1, 8])
+
+
+Z_train_18 = pca.transform(X_train_18)
+Z_test_18 = pca.transform(X_test_18)
+
+Z_train_k_18 = Z_train_18[:, :k]
+Z_test_k_18 = Z_test_18[:, :k]
+
+y_train_binary_18 = np.where(y_train_18 == 8, 1, -1)
+y_test_binary_18 = np.where(y_test_18 == 8, 1, -1)
+
+alphas = np.logspace(-4,4,20)
+
+cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=0)
+
+grid = GridSearchCV(
+    RidgeClassifier(fit_intercept=True),
+    param_grid={'alpha': alphas},
+    cv=cv,
+    scoring='accuracy'
+)
+
+grid.fit(Z_train_k_18, y_train_binary_18)
+
+best_alpha_18 = grid.best_params_['alpha']
+
+ridge_final_18 = RidgeClassifier(alpha=best_alpha_18, fit_intercept=True)
+ridge_final_18.fit(Z_train_k_18, y_train_binary_18)
+
+
+y_pred_18 = ridge_final_18.predict(Z_test_k_18)
+
+test_accuracy_18 = accuracy_score(y_test_binary_18, y_pred_18)
+
+print("Test accuracy for Ridge using [1,8]:", test_accuracy_18)
+
+##Task 5
+log_reg = LogisticRegression(
+    penalty=None,
+    fit_intercept=True,
+    solver='lbfgs',
+    max_iter=1000
+)
+
+log_reg.fit(Z_train_k_18, y_train_binary_18)
+
+y_pred_18 = log_reg.predict(Z_test_k_18)
+
+logistic_accuracy_18 = accuracy_score(y_test_binary_18, y_pred_18)
+
+print("Logistic regression accuracy using [1,8]:", logistic_accuracy_18)
+
+
+##Task 6
+
+X_train_38, y_train_38, X_test_38, y_test_38 = subset_capturing(
+    Xtraindata, ytrainlabels, Xtestdata, ytestlabels, [3, 8])
+
+
+Z_train_38 = pca.transform(X_train_38)
+Z_test_38 = pca.transform(X_test_38)
+
+Z_train_k_38 = Z_train_38[:, :k]
+Z_test_k_38 = Z_test_38[:, :k]
+
+y_train_binary_38 = np.where(y_train_38 == 8, 1, -1)
+y_test_binary_38 = np.where(y_test_38 == 8, 1, -1)
+
+alphas = np.logspace(-4,4,20)
+
+cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=0)
+
+grid = GridSearchCV(
+    RidgeClassifier(fit_intercept=True),
+    param_grid={'alpha': alphas},
+    cv=cv,
+    scoring='accuracy'
+)
+
+grid.fit(Z_train_k_38, y_train_binary_38)
+
+best_alpha_38 = grid.best_params_['alpha']
+
+ridge_final_38 = RidgeClassifier(alpha=best_alpha_38, fit_intercept=True)
+ridge_final_38.fit(Z_train_k_38, y_train_binary_38)
+
+y_pred_38 = ridge_final_38.predict(Z_test_k_38)
+
+test_accuracy_38 = accuracy_score(y_test_binary_38, y_pred_38)
+
+print("Test accuracy for Ridge using [3,8]:", test_accuracy_38)
+
+
+log_reg = LogisticRegression(
+    penalty=None,
+    fit_intercept=True,
+    solver='lbfgs',
+    max_iter=1000
+)
+
+log_reg.fit(Z_train_k_38, y_train_binary_38)
+
+y_pred_38 = log_reg.predict(Z_test_k_38)
+
+logistic_accuracy_38 = accuracy_score(y_test_binary_38, y_pred_38)
+
+print("Logistic regression accuracy using [3,8]:", logistic_accuracy_38)
+
+
+X_train_27, y_train_27, X_test_27, y_test_27 = subset_capturing(
+    Xtraindata, ytrainlabels, Xtestdata, ytestlabels, [2, 7])
+
+
+Z_train_27 = pca.transform(X_train_27)
+Z_test_27 = pca.transform(X_test_27)
+
+Z_train_k_27 = Z_train_27[:, :k]
+Z_test_k_27 = Z_test_27[:, :k]
+
+y_train_binary_27 = np.where(y_train_27 == 7, 1, -1)
+y_test_binary_27 = np.where(y_test_27 == 7, 1, -1)
+
+alphas = np.logspace(-4,4,20)
+
+cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=0)
+
+grid = GridSearchCV(
+    RidgeClassifier(fit_intercept=True),
+    param_grid={'alpha': alphas},
+    cv=cv,
+    scoring='accuracy'
+)
+
+grid.fit(Z_train_k_27, y_train_binary_27)
+
+best_alpha_27 = grid.best_params_['alpha']
+
+ridge_final_27 = RidgeClassifier(alpha=best_alpha_27, fit_intercept=True)
+ridge_final_27.fit(Z_train_k_27, y_train_binary_27)
+
+y_pred_27 = ridge_final_27.predict(Z_test_k_27)
+
+test_accuracy_27 = accuracy_score(y_test_binary_27, y_pred_27)
+
+print("Test accuracy for Ridge using [2,7]:", test_accuracy_27)
+
+
+log_reg = LogisticRegression(
+    penalty=None,
+    fit_intercept=True,
+    solver='lbfgs',
+    max_iter=1000
+)
+
+log_reg.fit(Z_train_k_27, y_train_binary_27)
+
+y_pred_27 = log_reg.predict(Z_test_k_27)
+
+logistic_accuracy_27 = accuracy_score(y_test_binary_27, y_pred_27)
+
+print("Logistic regression accuracy using [2,7]:", logistic_accuracy_27)
+
+##Task 7
+
+Z_train_all = pca.transform(Xtraindata)
+Z_test_all = pca.transform(Xtestdata)
+
+Z_train_k_all = Z_train_all[:, :k]
+Z_test_k_all = Z_test_all[:, :k]
+
+
+cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=0)
+
+grid_ridge_all = GridSearchCV(
+    RidgeClassifier(fit_intercept=True),
+    param_grid={'alpha': alphas},
+    cv=cv,
+    scoring='accuracy'
+)
+
+grid_ridge_all.fit(Z_train_k_all, ytrainlabels)
+
+best_alpha_all = grid_ridge_all.best_params_['alpha']
+print("Best alpha for multi-class Ridge:", best_alpha_all)
+
+
+ridge_final_all = RidgeClassifier(alpha=best_alpha_all, fit_intercept=True)
+ridge_final_all.fit(Z_train_k_all, ytrainlabels)
+
+y_pred_ridge_all = ridge_final_all.predict(Z_test_k_all)
+ridge_accuracy_all = accuracy_score(ytestlabels, y_pred_ridge_all)
+
+print("Test accuracy for multi-class Ridge:", ridge_accuracy_all)
+
+neighbors = [1, 3, 5, 7, 9]
+
+cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=0)
+
+grid_knn_all = GridSearchCV(
+    KNeighborsClassifier(),
+    param_grid={'n_neighbors': neighbors},cv=cv)
+
+
+grid_knn_all.fit(Z_train_k_all, ytrainlabels)
+
+best_k_neighbors = grid_knn_all.best_params_['n_neighbors']
+print("Best n_neighbors for KNN:", best_k_neighbors)
+
+knn_final_all = KNeighborsClassifier(n_neighbors=best_k_neighbors)
+knn_final_all.fit(Z_train_k_all, ytrainlabels)
+
+y_pred_knn_all = knn_final_all.predict(Z_test_k_all)
+knn_accuracy_all = accuracy_score(ytestlabels, y_pred_knn_all)
+
+print("Test accuracy for multi-class KNN:", knn_accuracy_all)
+
+
